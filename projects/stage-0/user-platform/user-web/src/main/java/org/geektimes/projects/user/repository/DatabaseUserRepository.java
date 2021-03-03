@@ -38,12 +38,47 @@ public class DatabaseUserRepository implements UserRepository {
     }
 
     private Connection getConnection() {
-        return dbConnectionManager.getConnection();
+        try {
+            return dbConnectionManager.getDataSource().getConnection();
+        } catch (SQLException throwables) {
+            throw new RuntimeException(throwables);
+        }
+    }
+
+    public void releaseConnection(Connection connection) {
+        if (connection != null) {
+            try {
+                connection.close();
+            } catch (SQLException e) {
+                throw new RuntimeException(e.getCause());
+            }
+        }
     }
 
     @Override
     public boolean save(User user) {
-        return false;
+        Connection connection = null;
+        boolean execute;
+        try {
+            connection = getConnection();
+            PreparedStatement preparedStatement = connection.prepareStatement("INSERT INTO users (name,password,email,phoneNumber) values (?, ?, ?, ?)");
+            preparedStatement.setString(1, user.getName());
+            preparedStatement.setString(2, user.getPassword());
+            preparedStatement.setString(3, user.getEmail());
+            preparedStatement.setString(4, user.getPhoneNumber());
+            execute = preparedStatement.execute();
+        } catch (Exception e) {
+            e.printStackTrace();
+            throw new RuntimeException(e);
+        } finally {
+            try {
+                connection.commit();
+            } catch (SQLException throwables) {
+                throwables.printStackTrace();
+            }
+            releaseConnection(connection);
+        }
+        return execute;
     }
 
     @Override
@@ -63,11 +98,24 @@ public class DatabaseUserRepository implements UserRepository {
 
     @Override
     public User getByNameAndPassword(String userName, String password) {
-        return executeQuery("SELECT id,name,password,email,phoneNumber FROM users WHERE name=? and password=?",
-                resultSet -> {
-                    // TODO
-                    return new User();
-                }, COMMON_EXCEPTION_HANDLER, userName, password);
+        try {
+            PreparedStatement preparedStatement = getConnection().prepareStatement("SELECT id,name,password,email,phoneNumber FROM users WHERE name=? and password=?");
+            preparedStatement.setString(1, userName);
+            preparedStatement.setString(2, password);
+            ResultSet resultSet = preparedStatement.executeQuery();
+            while (resultSet.next()) {
+                User user = new User();
+                user.setId(resultSet.getLong(1));
+                user.setName(resultSet.getString(2));
+                user.setPassword(resultSet.getString(3));
+                user.setEmail(resultSet.getString(4));
+                user.setPhoneNumber(resultSet.getString(5));
+                return user;
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return null;
     }
 
     @Override

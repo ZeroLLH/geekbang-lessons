@@ -4,19 +4,14 @@ import org.apache.commons.lang.StringUtils;
 import org.geektimes.web.mvc.controller.Controller;
 import org.geektimes.web.mvc.controller.PageController;
 import org.geektimes.web.mvc.controller.RestController;
-import org.geektimes.web.mvc.header.CacheControlHeaderWriter;
-import org.geektimes.web.mvc.header.annotation.CacheControl;
 
 import javax.servlet.RequestDispatcher;
 import javax.servlet.ServletConfig;
 import javax.servlet.ServletContext;
 import javax.servlet.ServletException;
-import javax.servlet.annotation.WebServlet;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
-import javax.ws.rs.DELETE;
-import javax.ws.rs.GET;
 import javax.ws.rs.HttpMethod;
 import javax.ws.rs.Path;
 import java.io.IOException;
@@ -32,7 +27,8 @@ public class FrontControllerServlet extends HttpServlet {
     /**
      * 请求路径和 Controller 的映射关系缓存
      */
-    private Map<String, Controller> controllersMapping = new HashMap<>();
+    private Map<Class<?>, Controller> controllersMapping = new HashMap<>();
+    private Map<String, Method> methodsMapping = new HashMap<>();
 
     /**
      * 请求路径和 {@link HandlerMethodInfo} 映射关系缓存
@@ -55,11 +51,12 @@ public class FrontControllerServlet extends HttpServlet {
     private void initHandleMethods() {
         for (Controller controller : ServiceLoader.load(Controller.class)) {
             Class<?> controllerClass = controller.getClass();
-            Path pathFromClass = controllerClass.getAnnotation(Path.class);
-            String requestPath = pathFromClass.value();
+            controllersMapping.put(controllerClass, controller);
             Method[] publicMethods = controllerClass.getMethods();
             // 处理方法支持的 HTTP 方法集合
             for (Method method : publicMethods) {
+                Path pathFromClass = controllerClass.getAnnotation(Path.class);
+                String requestPath = pathFromClass.value();
                 Set<String> supportedHttpMethods = findSupportedHttpMethods(method);
                 Path pathFromMethod = method.getAnnotation(Path.class);
                 if (pathFromMethod != null) {
@@ -67,8 +64,8 @@ public class FrontControllerServlet extends HttpServlet {
                 }
                 handleMethodInfoMapping.put(requestPath,
                         new HandlerMethodInfo(requestPath, method, supportedHttpMethods));
+                methodsMapping.put(requestPath, method);
             }
-            controllersMapping.put(requestPath, controller);
         }
     }
 
@@ -116,10 +113,10 @@ public class FrontControllerServlet extends HttpServlet {
         String requestMappingPath = substringAfter(requestURI,
                 StringUtils.replace(prefixPath, "//", "/"));
         // 映射到 Controller
-        Controller controller = controllersMapping.get(requestMappingPath);
+        Method method = methodsMapping.get(requestMappingPath);
 
-        if (controller != null) {
-
+        if (method != null) {
+            Controller controller = controllersMapping.get(method.getDeclaringClass());
             HandlerMethodInfo handlerMethodInfo = handleMethodInfoMapping.get(requestMappingPath);
 
             try {
@@ -134,8 +131,8 @@ public class FrontControllerServlet extends HttpServlet {
                     }
 
                     if (controller instanceof PageController) {
-                        PageController pageController = PageController.class.cast(controller);
-                        String viewPath = pageController.execute(request, response);
+                        PageController pageController = (PageController) controller;
+                        String viewPath = (String) method.invoke(pageController, request, response);
                         // 页面请求 forward
                         // request -> RequestDispatcher forward
                         // RequestDispatcher requestDispatcher = request.getRequestDispatcher(viewPath);
